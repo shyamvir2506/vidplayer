@@ -1,5 +1,7 @@
 # Hindi Video Dubber
 
+**GitHub:** https://github.com/shyamvir2506/vidplayer
+
 Real-time AI-powered Hindi dubbing webapp.
 
 ## Architecture
@@ -23,7 +25,7 @@ Video upload → FFmpeg (extract audio) → OpenAI Whisper (transcribe)
 ```bash
 cd backend
 npm install
-cp .env.example .env
+cp .env
 # Add your OpenAI API key to .env
 npm run dev
 ```
