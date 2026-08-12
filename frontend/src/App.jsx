@@ -1,5 +1,7 @@
 import React, { useState, useRef, useCallback } from 'react';
 import axios from 'axios';
+
+const API = process.env.REACT_APP_API_URL || '';
 import './App.css';
 import VideoPlayer from './components/VideoPlayer';
 import UploadSection from './components/UploadSection';
@@ -37,7 +39,7 @@ export default function App() {
     try {
       const formData = new FormData();
       formData.append('video', videoFile);
-      const { data } = await axios.post('/api/dub', formData, {
+      const { data } = await axios.post(`${API}/api/dub`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setJobId(data.jobId);
@@ -56,11 +58,11 @@ export default function App() {
     clearInterval(pollingRef.current);
     pollingRef.current = setInterval(async () => {
       try {
-        const { data } = await axios.get(`/api/status/${id}`);
+        const { data } = await axios.get(`${API}/api/status/${id}`);
         setJobStatus(data);
         if (data.status === 'completed') {
           clearInterval(pollingRef.current);
-          setDubbedAudioUrl(data.audioUrl);
+          setDubbedAudioUrl(`${API}${data.audioUrl}`);
           setIsDubActive(true);
         } else if (data.status === 'error') {
           clearInterval(pollingRef.current);
