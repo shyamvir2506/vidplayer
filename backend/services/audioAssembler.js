@@ -10,42 +10,67 @@ ffmpeg.setFfprobePath(ffprobePath);
 /**
  * Assembles individual TTS audio segments into a single timed audio track
  * that matches the original video timeline.
+ * Simplified approach: pad each segment with leading silence, then concatenate.
  */
 async function assembleDubbedAudio(segments, videoDuration, outputPath, tempDir) {
   const valid = segments.filter(s => s.audioFile && fs.existsSync(s.audioFile));
 
   if (valid.length === 0) throw new Error('No valid TTS segments to assemble');
 
-  // Create a silent base track covering the full video duration
-  const silencePath = path.join(tempDir, 'silence.mp3');
-  await createSilence(Math.ceil(videoDuration) + 3, silencePath);
+  // Create a concat file for FFmpeg
+  const concatFilePath = path.join(tempDir, 'concat.txt');
+  const paddedFiles = [];
+  let currentTime = 0;
 
-  // Build FFmpeg filter: delay each segment to its original start time, then mix all
-  const inputs = [silencePath, ...valid.map(s => s.audioFile)];
-  let filterParts = '';
-  const streamLabels = [];
+  // For each segment, create a padded version with leading silence
+  for (let i = 0; i < valid.length; i++) {
+    const seg = valid[i];
+    const delayFromPrev = seg.start - currentTime;
+    const paddedPath = path.join(tempDir, `padded_${i}.mp3`);
+    
+    if (delayFromPrev > 0) {
+      // Add silence before this segment
+      const silencePath = path.join(tempDir, `silence_${i}.mp3`);
+      await createSilence(delayFromPrev, silencePath);
+      paddedFiles.push(silencePath);
+    }
 
-  valid.forEach((seg, i) => {
-    const delayMs = Math.round(seg.start * 1000);
-    const label = `a${i}`;
-    filterParts += `[${i + 1}:a]adelay=${delayMs}|${delayMs}[${label}];`;
-    streamLabels.push(`[${label}]`);
-  });
+    // Add the TTS audio file
+    paddedFiles.push(seg.audioFile);
+    currentTime = seg.end;
+  }
 
-  // Mix the silence base with all delayed TTS streams; normalize=0 prevents volume reduction
-  const filterComplex =
-    filterParts +
-    `[0:a]${streamLabels.join('')}amix=inputs=${valid.length + 1}:normalize=0[out]`;
+  // Add trailing silence if needed
+  const trailingDuration = videoDuration - currentTime;
+  if (trailingDuration > 0) {
+    const trailingSilencePath = path.join(tempDir, 'trailing_silence.mp3');
+    await createSilence(trailingDuration, trailingSilencePath);
+    paddedFiles.push(trailingSilencePath);
+  }
 
+  // Create FFmpeg concat file
+  const concatContent = paddedFiles
+    .map(file => `file '${file.replace(/'/g, "'\\''")}'`)
+    .join('\n');
+  fs.writeFileSync(concatFilePath, concatContent);
+
+  // Use concat demuxer (more reliable than filters)
   await new Promise((resolve, reject) => {
-    let cmd = ffmpeg();
-    inputs.forEach(input => cmd.input(input));
-    cmd
-      .complexFilter(filterComplex)
-      .outputOptions(['-map', '[out]', '-acodec', 'libmp3lame', '-q:a', '3'])
+    console.log(`Concatenating ${paddedFiles.length} audio segments...`);
+    
+    ffmpeg()
+      .input(concatFilePath)
+      .inputOptions(['-f', 'concat', '-safe', '0'])
+      .outputOptions(['-acodec', 'libmp3lame', '-q:a', '3'])
       .output(outputPath)
-      .on('end', resolve)
-      .on('error', reject)
+      .on('end', () => {
+        console.log('Audio assembly complete');
+        resolve();
+      })
+      .on('error', (err) => {
+        console.error('Audio assembly error:', err.message);
+        reject(err);
+      })
       .run();
   });
 }

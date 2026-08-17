@@ -6,11 +6,10 @@ function extractAudio(videoPath, outputPath) {
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
       .outputOptions([
-        '-vn',           // no video
-        '-acodec', 'libmp3lame',
-        '-ar', '16000',  // 16kHz sample rate (optimal for Whisper)
-        '-ac', '1',      // mono
-        '-q:a', '4'
+        '-vn',              // no video
+        '-acodec', 'pcm_s16le', // uncompressed PCM (required for local Whisper decoding)
+        '-ar', '16000',     // 16kHz sample rate (required by Whisper)
+        '-ac', '1'          // mono
       ])
       .output(outputPath)
       .on('end', resolve)

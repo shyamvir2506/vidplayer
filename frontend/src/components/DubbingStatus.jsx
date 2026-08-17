@@ -19,7 +19,7 @@ function getStepIcon(message = '') {
 export default function DubbingStatus({ status, onRetry }) {
   if (!status) return null;
 
-  const { status: state, progress = 0, message = '' } = status;
+  const { status: state, progress = 0, message = '', debug } = status;
 
   return (
     <div className={`dubbing-status status-${state}`}>
@@ -51,6 +51,7 @@ export default function DubbingStatus({ status, onRetry }) {
           <p className="error-card-message">
             {message.length > 150 ? 'An unexpected error occurred. Please try again.' : message}
           </p>
+          {debug && <pre className="error-debug">{debug}</pre>}
           {onRetry && (
             <button className="btn btn-retry" onClick={onRetry}>
               ↩ Try Again

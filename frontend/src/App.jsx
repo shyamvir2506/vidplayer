@@ -16,6 +16,7 @@ export default function App() {
   const [isDubActive, setIsDubActive] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const pollingRef = useRef(null);
+  const pollErrorCountRef = useRef(0);
 
   const handleVideoSelect = useCallback((file) => {
     // Revoke previous blob URL to avoid memory leaks
@@ -56,9 +57,11 @@ export default function App() {
 
   const startPolling = (id) => {
     clearInterval(pollingRef.current);
+    pollErrorCountRef.current = 0;
     pollingRef.current = setInterval(async () => {
       try {
         const { data } = await axios.get(`${API}/api/status/${id}`);
+        pollErrorCountRef.current = 0;
         setJobStatus(data);
         if (data.status === 'completed') {
           clearInterval(pollingRef.current);
@@ -67,9 +70,21 @@ export default function App() {
         } else if (data.status === 'error') {
           clearInterval(pollingRef.current);
         }
-      } catch {
-        clearInterval(pollingRef.current);
-        setJobStatus({ status: 'error', message: 'Lost connection to server.' });
+      } catch (err) {
+        if (err?.response?.status === 404) {
+          clearInterval(pollingRef.current);
+          setJobStatus({
+            status: 'error',
+            message: 'Job not found. The backend was likely restarted. Please upload and start dubbing again.'
+          });
+          return;
+        }
+
+        pollErrorCountRef.current += 1;
+        if (pollErrorCountRef.current >= 5) {
+          clearInterval(pollingRef.current);
+          setJobStatus({ status: 'error', message: 'Lost connection to server.' });
+        }
       }
     }, 2000);
   };

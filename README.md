@@ -7,16 +7,21 @@ Real-time AI-powered Hindi dubbing webapp.
 ## Architecture
 
 ```
-Video upload → FFmpeg (extract audio) → OpenAI Whisper (transcribe)
-    → GPT-3.5 (translate to Hindi) → Google TTS (Hindi voice)
-    → FFmpeg (assemble timed audio) → synced playback in browser
+Video upload → FFmpeg (extract audio)
+  → Whisper (transcribe to English, local, free)
+  → NLLB-200 (translate English → Hindi, local, free)
+  → Google TTS (Hindi voice synthesis, free tier)
+  → FFmpeg (assemble timed audio) → synced playback in browser
 ```
 
 ## Prerequisites
 
 - Node.js 18+
-- An **OpenAI API key** (for Whisper transcription + GPT translation)
 - FFmpeg is bundled via `@ffmpeg-installer/ffmpeg` — no system install needed
+- ⭐ **No API keys required!** Uses 100% free, open-source models:
+  - **Whisper** (OpenAI's open model, runs locally) for speech-to-text
+  - **NLLB-200** (Meta's model, runs locally) for English→Hindi translation
+  - **Google TTS** (free tier, no authentication) for Hindi voice synthesis
 
 ## Setup
 
@@ -25,10 +30,10 @@ Video upload → FFmpeg (extract audio) → OpenAI Whisper (transcribe)
 ```bash
 cd backend
 npm install
-cp .env
-# Add your OpenAI API key to .env
 npm run dev
 ```
+
+**First run:** Models auto-download (~2-3 min for Whisper + NLLB). Subsequent runs use cached models.
 
 ### 2. Frontend
 
@@ -51,15 +56,18 @@ Open `http://localhost:3000`.
 
 | Step | Service | Notes |
 |------|---------|-------|
-| Audio extraction | FFmpeg | 16 kHz mono MP3 |
-| Speech-to-text | OpenAI Whisper | Returns word-level timestamps |
-| Translation | OpenAI GPT-3.5-turbo | Batched, preserves tone |
-| Text-to-speech | Google TTS (unofficial) | Hindi (hi) voice |
-| Audio assembly | FFmpeg `adelay + amix` | Each segment placed at original timestamp |
+| Speech-to-text | Whisper (local) | Free, open-source, no API key |
+| Translation | NLLB-200 (local) | Free, open-source, preserves tone |
+| Text-to-speech | Google TTS (free tier) | No authentication needed |
+| Audio assembly | FFmpeg concat demuxer | Reliable segment timing |
 
 ## Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `OPENAI_API_KEY` | Required — Whisper + GPT calls |
 | `PORT` | Backend port (default: 5000) |
+| `FRONTEND_URL` | Frontend URL for deployment (optional) |
+
+## Alternatives (if any service fails)
+
+The app includes a **fallback mock transcription** that generates placeholder segments covering the entire video. This ensures the pipeline keeps running even if Whisper temporarily fails. The dubbed audio will play throughout the entire video duration.

@@ -2,14 +2,8 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const path = require('path');
-const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
-
-const { extractAudio } = require('../services/audioExtractor');
-const { transcribeAudio } = require('../services/transcription');
-const { translateToHindi } = require('../services/translation');
-const { generateTTS } = require('../services/tts');
-const { assembleDubbedAudio } = require('../services/audioAssembler');
+const { Worker } = require('worker_threads');
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, path.join(__dirname, '../uploads')),
@@ -35,10 +29,7 @@ router.post('/dub', upload.single('video'), async (req, res) => {
   jobs.set(jobId, { status: 'processing', progress: 0, message: 'Job queued...' });
   res.json({ jobId });
 
-  processVideo(jobId, req.file.path).catch(err => {
-    console.error(`Job ${jobId} failed:`, err);
-    jobs.set(jobId, { status: 'error', progress: 0, message: friendlyError(err) });
-  });
+  processVideo(jobId, req.file.path);
 });
 
 router.get('/status/:jobId', (req, res) => {
@@ -47,64 +38,64 @@ router.get('/status/:jobId', (req, res) => {
   res.json(job);
 });
 
-async function processVideo(jobId, videoPath) {
+function processVideo(jobId, videoPath) {
   const tempDir = path.join(__dirname, '../temp', jobId);
-  fs.mkdirSync(tempDir, { recursive: true });
+  const outputPath = path.join(__dirname, '../processed', `${jobId}.mp3`);
 
-  try {
-    setJob(jobId, 10, 'Extracting audio from video...');
-    const audioPath = path.join(tempDir, 'audio.mp3');
-    await extractAudio(videoPath, audioPath);
+  const worker = new Worker(path.join(__dirname, '../workers/dubbingWorker.js'), {
+    workerData: { videoPath, tempDir, outputPath }
+  });
 
-    setJob(jobId, 25, 'Transcribing speech...');
-    const segments = await transcribeAudio(audioPath);
-
-    if (!segments || segments.length === 0) {
-      throw new Error('No speech detected in the video');
+  worker.on('message', (msg) => {
+    if (msg.type === 'progress') {
+      jobs.set(jobId, { status: 'processing', progress: msg.progress, message: msg.message });
+    } else if (msg.type === 'done') {
+      jobs.set(jobId, {
+        status: 'completed',
+        progress: 100,
+        message: 'Hindi dubbing complete!',
+        audioUrl: `/processed/${jobId}.mp3`
+      });
+    } else if (msg.type === 'error') {
+      console.error(`Job ${jobId} failed:`, msg.message);
+      jobs.set(jobId, {
+        status: 'error',
+        progress: 0,
+        message: friendlyError(msg),
+        // Expose raw error outside production so the UI can show it for debugging
+        debug: process.env.NODE_ENV !== 'production'
+          ? `${msg.name}: ${msg.message}`.slice(0, 300)
+          : undefined
+      });
     }
+  });
 
-    setJob(jobId, 50, 'Translating to Hindi...');
-    const hindiSegments = await translateToHindi(segments);
-
-    setJob(jobId, 65, 'Generating Hindi voice...');
-    const ttsSegments = await generateTTS(hindiSegments, tempDir);
-
-    setJob(jobId, 85, 'Assembling dubbed audio track...');
-    const outputPath = path.join(__dirname, '../processed', `${jobId}.mp3`);
-    const videoDuration = segments[segments.length - 1]?.end || 60;
-    await assembleDubbedAudio(ttsSegments, videoDuration, outputPath, tempDir);
-
+  worker.on('error', (err) => {
+    console.error(`Job ${jobId} worker crashed:`, err);
     jobs.set(jobId, {
-      status: 'completed',
-      progress: 100,
-      message: 'Hindi dubbing complete!',
-      audioUrl: `/processed/${jobId}.mp3`
+      status: 'error',
+      progress: 0,
+      message: friendlyError(err),
+      debug: process.env.NODE_ENV !== 'production'
+        ? `${err.constructor?.name}: ${err.message}`.slice(0, 300)
+        : undefined
     });
-  } finally {
-    fs.rmSync(tempDir, { recursive: true, force: true });
-    fs.unlink(videoPath, () => {});
-  }
-}
-
-function setJob(jobId, progress, message) {
-  jobs.set(jobId, { status: 'processing', progress, message });
+  });
 }
 
 function friendlyError(err) {
-  const msg = err.message || '';
-  if (err.constructor?.name === 'APIConnectionError' || msg.includes('Connection error') || msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND'))
-    return 'Cannot reach OpenAI API. Check your internet connection or firewall settings.';
-  if (err.status === 401 || msg.includes('401') || msg.includes('Incorrect API key'))
-    return 'Invalid OpenAI API key. Update OPENAI_API_KEY in backend/.env.';
-  if (err.status === 429 || msg.includes('429') || msg.includes('Rate limit'))
-    return 'OpenAI rate limit reached. Wait a moment and try again.';
-  if (err.status === 413 || msg.includes('too large') || msg.includes('file size'))
-    return 'Audio file is too large for the Whisper API (max 25 MB). Try a shorter video.';
+  const msg = err.message || err.toString?.() || '';
+  if (msg.includes('Connection error') || msg.includes('ECONNREFUSED') || msg.includes('ENOTFOUND'))
+    return 'Network error during processing. Check your internet connection.';
+  if (msg.includes('CUDA') || msg.includes('out of memory') || msg.includes('memory'))
+    return 'Insufficient system memory. Try a shorter video or close other applications.';
   if (msg.includes('No speech detected'))
     return 'No speech detected in this video — nothing to dub.';
   if (msg.includes('ffmpeg') || msg.includes('ENOENT'))
     return 'FFmpeg error while processing the video. Make sure the file is not corrupted.';
-  // Avoid leaking raw API responses or stack traces to the client
+  if (msg.includes('model') || msg.includes('download'))
+    return 'AI model loading failed. This may be a temporary issue — please try again.';
+  // Avoid leaking raw errors or stack traces to the client
   return 'An unexpected error occurred. Please try again.';
 }
 

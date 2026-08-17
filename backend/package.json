@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@xenova/transformers": "^2.6.0",
     "ffprobe-static": "^3.1.0",
     "axios": "^1.6.2",
     "cors": "^2.8.5",
@@ -17,8 +18,8 @@
     "fluent-ffmpeg": "^2.1.2",
     "google-tts-api": "^2.0.2",
     "multer": "^1.4.5-lts.1",
-    "openai": "^4.24.0",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
+    "wav": "^1.0.2"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
